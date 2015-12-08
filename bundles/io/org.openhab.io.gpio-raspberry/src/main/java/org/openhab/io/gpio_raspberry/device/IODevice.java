@@ -76,9 +76,9 @@ public class IODevice extends Device<IOConfig, GpioIOItemConfig> {
 				}
 				
 				if (on) {
-					eventPublisher.postUpdate(itemConfig.getItemName(), OnOffType.ON);
+					eventPublisher.sendCommand(itemConfig.getItemName(), OnOffType.ON);
 				} else {
-					eventPublisher.postUpdate(itemConfig.getItemName(), OnOffType.OFF);
+					eventPublisher.sendCommand(itemConfig.getItemName(), OnOffType.OFF);
 				}
 				
 				timeLastAction = System.currentTimeMillis();
