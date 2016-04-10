@@ -145,6 +145,8 @@
 	<module>org.openhab.binding.gpio-humidity</module>
 	<module>org.openhab.binding.gpio-humidity.test</module>
 	<module>org.openhab.binding.gpio-mcp3008</module>
+	<module>org.openhab.binding.gpio-mcp23016</module>
+	<module>org.openhab.binding.gpio-mcp23017</module>
     <module>org.openhab.binding.ecobee</module>
     <module>org.openhab.binding.nest</module>
     <module>org.openhab.binding.satel</module>
