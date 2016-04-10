@@ -48,6 +48,7 @@ Bundle-ClassPath: .,
  lib/httpclient-4.3.5.jar,
  lib/httpcore-4.3.2.jar,
  lib/ical4j-2.0-beta1.jar,
- lib/sardine-5.6.jar
+ lib/sardine-5.6.jar,
+ lib/json-20160212.jar
 Export-Package: org.openhab.io.caldav
 Bundle-ActivationPolicy: lazy

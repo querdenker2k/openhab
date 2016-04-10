@@ -9,12 +9,14 @@
 package org.openhab.io.caldav.internal.job;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URL;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -34,6 +36,7 @@ import org.openhab.io.caldav.internal.CalDavLoaderImpl;
 import org.openhab.io.caldav.internal.EventStorage;
 import org.openhab.io.caldav.internal.EventStorage.CalendarRuntime;
 import org.openhab.io.caldav.internal.EventStorage.EventContainer;
+import org.openhab.io.caldav.internal.OAuthUtil;
 import org.openhab.io.caldav.internal.Util;
 import org.quartz.Job;
 import org.quartz.JobExecutionContext;
@@ -46,6 +49,7 @@ import org.slf4j.LoggerFactory;
 import com.github.sardine.DavResource;
 import com.github.sardine.Sardine;
 import com.github.sardine.impl.SardineException;
+
 import net.fortuna.ical4j.data.CalendarBuilder;
 import net.fortuna.ical4j.data.ParserException;
 import net.fortuna.ical4j.data.UnfoldingReader;
@@ -108,7 +112,11 @@ public class EventReloaderJob implements Job {
             for (EventContainer eventContainer : eventRuntime.getEventMap().values()) {
                 oldEventIds.add(eventContainer.getFilename());
             }
-            loadEvents(eventRuntime, oldEventIds);
+            if (eventRuntime.getConfig().isOauth()) {
+                loadEventsOauth(eventRuntime, oldEventIds);
+            } else {
+                loadEvents(eventRuntime, oldEventIds);
+            }
             // stop all events in oldMap
             removeDeletedEvents(config, oldEventIds);
 
@@ -122,24 +130,31 @@ public class EventReloaderJob implements Job {
 
             // printAllEvents();
         } catch (SardineException e) {
-            log.error(
-                    "error while loading calendar entries: " + e.getMessage() + " (" + e.getStatusCode() + " - " + e.getResponsePhrase() + ")",
-                    e);
-            throw new JobExecutionException(
-                    "error while loading calendar entries", e, false);
+            log.error("error while loading calendar entries: " + e.getMessage() + " (" + e.getStatusCode() + " - "
+                    + e.getResponsePhrase() + ")", e);
+            throw new JobExecutionException("error while loading calendar entries", e, false);
         } catch (Exception e) {
-            log.error(
-                    "error while loading calendar entries: " + e.getMessage(),
-                    e);
-            throw new JobExecutionException(
-                    "error while loading calendar entries", e, false);
+            log.error("error while loading calendar entries: " + e.getMessage(), e);
+            throw new JobExecutionException("error while loading calendar entries", e, false);
         }
     }
 
-    private synchronized void removeDeletedEvents(String calendarKey,
-            List<String> oldMap) {
-        final CalendarRuntime eventRuntime = EventStorage.getInstance()
-                .getEventCache().get(calendarKey);
+    private void loadEventsOauth(CalendarRuntime calendarRuntime, List<String> oldEventIds) {
+        CalDavConfig config = calendarRuntime.getConfig();
+
+        try {
+            String calendar = OAuthUtil.getCalendars(config.getKey(), config.getUsername(), config.getPassword(),
+                    config.getUrl());
+
+            this.loadEvents(config.getKey(), null,
+                    new ByteArrayInputStream(calendar.getBytes(Charset.forName("UTF-8"))), config, oldEventIds, false);
+        } catch (Exception e) {
+            log.error("error loading calendar entries", e);
+        }
+    }
+
+    private synchronized void removeDeletedEvents(String calendarKey, List<String> oldMap) {
+        final CalendarRuntime eventRuntime = EventStorage.getInstance().getEventCache().get(calendarKey);
 
         for (String filename : oldMap) {
             EventContainer eventContainer = eventRuntime.getEventContainerByFilename(filename);
@@ -193,7 +208,7 @@ public class EventReloaderJob implements Job {
 
     /**
      * all events which are available must be removed from the oldEventIds list
-     * 
+     *
      * @param calendarRuntime
      * @param oldEventIds
      * @throws IOException
@@ -209,75 +224,63 @@ public class EventReloaderJob implements Job {
 
         for (DavResource resource : list) {
             final String filename = Util.getFilename(resource.getName());
-            
+
             try {
                 if (resource.isDirectory()) {
                     continue;
                 }
-    
+
                 oldEventIds.remove(filename);
-    
+
                 // must not be loaded
-                EventContainer eventContainer = calendarRuntime
-                        .getEventContainerByFilename(filename);
-                final org.joda.time.DateTime lastResourceChangeFS = new org.joda.time.DateTime(
-                        resource.getModified());
-    
+                EventContainer eventContainer = calendarRuntime.getEventContainerByFilename(filename);
+                final org.joda.time.DateTime lastResourceChangeFS = new org.joda.time.DateTime(resource.getModified());
+
                 log.trace("eventContainer found: {}", eventContainer != null);
                 log.trace("last resource modification: {}", lastResourceChangeFS);
                 log.trace("last change of already loaded event: {}",
-                        eventContainer != null ? eventContainer.getLastChanged()
-                                : null);
+                        eventContainer != null ? eventContainer.getLastChanged() : null);
                 if (config.isLastModifiedFileTimeStampValid()) {
-                    if (eventContainer != null
-                            && !lastResourceChangeFS.isAfter(eventContainer
-                                    .getLastChanged())) {
+                    if (eventContainer != null && !lastResourceChangeFS.isAfter(eventContainer.getLastChanged())) {
                         // check if some timers or single (from repeating events) have
                         // to be created
-                        if (eventContainer.getCalculatedUntil() != null
-                                && eventContainer.getCalculatedUntil().isAfter(
-                                org.joda.time.DateTime.now().plusMinutes(
-                                        config.getReloadMinutes()))) {
+                        if (eventContainer.getCalculatedUntil() != null && eventContainer.getCalculatedUntil()
+                                .isAfter(org.joda.time.DateTime.now().plusMinutes(config.getReloadMinutes()))) {
                             // the event is calculated as long as the next reload
                             // interval can handle this
-                            log.trace("skipping resource {}, not changed (calculated until: {})",
-                                    resource.getName(), eventContainer.getCalculatedUntil());
+                            log.trace("skipping resource {}, not changed (calculated until: {})", resource.getName(),
+                                    eventContainer.getCalculatedUntil());
                             continue;
                         }
-        
+
                         if (eventContainer.isHistoricEvent()) {
                             // no more upcoming events, do nothing
-                            log.trace("skipping resource {}, not changed (historic)",
-                                    resource.getName());
+                            log.trace("skipping resource {}, not changed (historic)", resource.getName());
                             continue;
                         }
-        
+
                         File icsFile = Util.getCacheFile(config.getKey(), filename);
                         if (icsFile != null && icsFile.exists()) {
                             FileInputStream fis = new FileInputStream(icsFile);
-                            this.loadEvents(filename, lastResourceChangeFS, fis, config,
-                                    oldEventIds, false);
+                            this.loadEvents(filename, lastResourceChangeFS, fis, config, oldEventIds, false);
                             fis.close();
                             continue;
                         }
                     }
                 }
-    
+
                 log.debug("loading resource: {}", resource);
-    
+
                 // prepare resource url
                 URL url = new URL(config.getUrl());
                 String resourcePath = resource.getPath();
                 String escapedResource = resource.getName().replaceAll("/", "%2F");
                 resourcePath = resourcePath.replace(resource.getName(), escapedResource);
-                url = new URL(url.getProtocol(), url.getHost(), url.getPort(),
-                        resourcePath);
-    
-                InputStream inputStream = sardine.get(url.toString().replaceAll(
-                        " ", "%20"));
+                url = new URL(url.getProtocol(), url.getHost(), url.getPort(), resourcePath);
 
-                this.loadEvents(filename, lastResourceChangeFS, inputStream, config,
-                        oldEventIds, false);
+                InputStream inputStream = sardine.get(url.toString().replaceAll(" ", "%20"));
+
+                this.loadEvents(filename, lastResourceChangeFS, inputStream, config, oldEventIds, false);
             } catch (ParserException e) {
                 log.error("error parsing ics file: " + filename, e);
             } catch (SardineException e) {
@@ -286,14 +289,12 @@ public class EventReloaderJob implements Job {
         }
     }
 
-    public void loadEvents(String filename,
-            org.joda.time.DateTime lastResourceChangeFS, final InputStream inputStream,
-            final CalDavConfig config, final List<String> oldEventIds,
-            boolean readFromFile) throws IOException, ParserException {
+    public void loadEvents(String filename, org.joda.time.DateTime lastResourceChangeFS, final InputStream inputStream,
+            final CalDavConfig config, final List<String> oldEventIds, boolean readFromFile)
+                    throws IOException, ParserException {
         CalendarBuilder builder = new CalendarBuilder();
         InputStreamReader is = new InputStreamReader(inputStream, config.getCharset());
-        BufferedReader in = new BufferedReader(
-                is, 50);
+        BufferedReader in = new BufferedReader(is, 50);
 
         final UnfoldingReader uin = new UnfoldingReader(in, 50, true);
         Calendar calendar = builder.build(uin);
@@ -403,6 +404,7 @@ public class EventReloaderJob implements Job {
 
     /**
      * Returns a list of categories or an empty list if none found.
+     *
      * @param vEvent
      * @return
      */
@@ -414,11 +416,11 @@ public class EventReloaderJob implements Job {
                 String[] categoriesSplit = StringUtils.split(categories, ",");
                 return Arrays.asList(categoriesSplit);
             }
-            
+
         }
         return new ArrayList<String>();
     }
-    
+
     private org.joda.time.DateTime getDateTime(String dateType, DateTime date, Date rangeDate) {
         org.joda.time.DateTime start;
         if (date.getTimeZone() == null) {
