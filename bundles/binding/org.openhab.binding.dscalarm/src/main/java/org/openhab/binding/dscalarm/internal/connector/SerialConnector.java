@@ -48,7 +48,7 @@ public class SerialConnector implements DSCAlarmConnector, SerialPortEventListen
 	private SerialPort serialPort = null;
 	private OutputStreamWriter serialOutput = null;
 	private BufferedReader serialInput = null;
-	private DSCAlarmConnectorType connectorType = DSCAlarmConnectorType.SERIAL;
+	private DSCAlarmConnectorType connectorType = DSCAlarmConnectorType.IT100;
 	private static boolean connected = false;
 	private static List<DSCAlarmEventListener> _listeners = new ArrayList<DSCAlarmEventListener>();
 
@@ -74,6 +74,7 @@ public class SerialConnector implements DSCAlarmConnector, SerialPortEventListen
         try {
         	serialOutput.write(writeString);
             serialOutput.flush();
+    		logger.debug("write(): Message Sent: {}",writeString);
         }catch (IOException ioException) {
         	logger.error("write(): {}",ioException);
 			connected = false;
@@ -91,6 +92,7 @@ public class SerialConnector implements DSCAlarmConnector, SerialPortEventListen
 
         try {
         	message = readLine();
+    		logger.debug("read(): Message Received: {}",message);
         }
         catch (IOException ioException) {
 			logger.error("read(): IO Exception: ", ioException);
@@ -156,7 +158,7 @@ public class SerialConnector implements DSCAlarmConnector, SerialPortEventListen
 	  */
 	 public synchronized void handleIncomingMessage(String incomingMessage) {
 		APIMessage Message = new APIMessage(incomingMessage);
-		logger.debug("handleIncomingMessage(): Message recieved: {} - {}",incomingMessage,Message.toString());
+		logger.debug("handleIncomingMessage(): Message received: {} - {}",incomingMessage,Message.toString());
 
 		DSCAlarmEvent event = new DSCAlarmEvent(this);
 		event.dscAlarmEventMessage(Message);

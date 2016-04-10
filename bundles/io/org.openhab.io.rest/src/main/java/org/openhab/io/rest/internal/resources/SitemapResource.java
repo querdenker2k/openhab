@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2010-2015, openHAB.org and others.
+ * Copyright (c) 2010-2016, openHAB.org and others.
  *
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
@@ -330,18 +330,7 @@ public class SitemapResource {
     		Switch switchWidget = (Switch) widget;
     		for(Mapping mapping : switchWidget.getMappings()) {
     			MappingBean mappingBean = new MappingBean();
-				// Remove quotes - if they exist
-				if(mapping.getCmd() != null) {
-					if(mapping.getCmd().startsWith("\"") && mapping.getCmd().endsWith("\"")) {
-						mappingBean.command = mapping.getCmd().substring(1, mapping.getCmd().length()-1);
-					}
-					else {
-						mappingBean.command = mapping.getCmd();
-					}
-				}
-				else {
-					mappingBean.command = mapping.getCmd();
-				}
+				mappingBean.command = mapping.getCmd();
 				mappingBean.label = mapping.getLabel();
 				bean.mappings.add(mappingBean);
 			}
@@ -350,18 +339,7 @@ public class SitemapResource {
 			Selection selectionWidget = (Selection) widget;
 			for (Mapping mapping : selectionWidget.getMappings()) {
 				MappingBean mappingBean = new MappingBean();
-				// Remove quotes - if they exist
-				if(mapping.getCmd() != null) {
-					if(mapping.getCmd().startsWith("\"") && mapping.getCmd().endsWith("\"")) {
-						mappingBean.command = mapping.getCmd().substring(1, mapping.getCmd().length()-1);
-					}
-					else {
-						mappingBean.command = mapping.getCmd();
-					}				
-				}
-				else {
-					mappingBean.command = mapping.getCmd();
-				}
+				mappingBean.command = mapping.getCmd();
     			mappingBean.label = mapping.getLabel();
     			bean.mappings.add(mappingBean);
     		}
@@ -422,6 +400,9 @@ public class SitemapResource {
 				catch (UnsupportedEncodingException ex) {
 					throw new RuntimeException(ex.getMessage(), ex);
 				}
+			}
+			if(uri.getFragment() != null) {
+				sb.append("#" + uri.getFragment());
 			}
 			sbBaseUrl.append(sb.toString());
 			bean.url = sbBaseUrl.toString();
