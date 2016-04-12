@@ -1,16 +1,30 @@
 package org.openhab.binding.gpio_mcp23016.internal;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.logging.Logger;
+
+import org.openhab.core.events.EventPublisher;
+import org.openhab.core.items.Item;
+import org.openhab.core.library.items.ContactItem;
+import org.openhab.core.library.items.SwitchItem;
+import org.openhab.core.library.types.OnOffType;
+import org.openhab.core.library.types.OpenClosedType;
+import org.openhab.core.types.Command;
+import org.openhab.core.types.State;
+import org.openhab.io.gpio_raspberry.device.I2CDevice;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig> {
     private static final Logger LOG = LoggerFactory.getLogger(MCP23016Device.class);
 
     private ExecutorService executors = Executors.newCachedThreadPool();
     private Map<Byte, Runnable> pollingMap = new HashMap<Byte, Runnable>();
+    private List<String> directionSetList = new ArrayList<String>();
 
     public MCP23016Device(MCP23016Config config) {
         super(config);
@@ -23,7 +37,7 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
         }
 
         final byte portMask = (byte) (0x01 << itemConfig.getPort());
-        this.setAsInput(portMask, itemConfig.getPort(), itemConfig.getBank());
+        this.setDirection(portMask, itemConfig.getPort(), itemConfig.getBank(), true);
 
         PollingThread run = new PollingThread(portMask, itemConfig.getBank(), eventPublisher,
                 itemConfig.getItem().getName(), itemConfig.getItem().getClass(), itemConfig.getPollInterval());
@@ -79,26 +93,20 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
                 new Object[] { Integer.toHexString(address), Integer.toHexString(portAddress),
                         Integer.toHexString(registerDir), Integer.toHexString(registerSwitch) });
 
+        this.setDirection(portAddress, port, bank, false);
+
         super.open("/dev/i2c-1");
         try {
-            int oldValue = super.read(registerDir);
-            LOG.debug("reading dir register: " + Integer.toHexString(oldValue & 0xFF));
-            byte newValue = (byte) (oldValue & 0xFF & ~portAddress);
-            LOG.debug("setting dir register: " + Integer.toHexString(newValue));
-            boolean res = super.write(registerDir, newValue);
-            if (!res) {
-                throw new IllegalStateException("cannot set port as output, error='" + res + "'");
-            }
-
-            oldValue = super.read(registerSwitch);
-            LOG.debug("reading port register: " + Integer.toHexString(oldValue));
+            byte newValue;
+            int oldValue = super.read(registerSwitch);
+            LOG.debug("reading port register: " + String.format("%02x", oldValue));
             if (on) {
                 newValue = (byte) (oldValue | portAddress);
             } else {
                 newValue = (byte) (oldValue & ~portAddress);
             }
-            LOG.debug("setting port register: " + Integer.toHexString(newValue));
-            res = super.write(registerSwitch, newValue);
+            LOG.debug("setting port register: " + String.format("%02x", newValue));
+            boolean res = super.write(registerSwitch, newValue);
             if (!res) {
                 throw new IllegalStateException("cannot read value on port, error='" + res + "'");
             }
@@ -127,29 +135,39 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
         }
     }
 
-    private void setAsInput(byte portMask, byte port, char bank) {
+    private void setDirection(byte portMask, byte port, char bank, boolean in) {
+        if (directionSetList.contains(bank + "" + port)) {
+            return;
+        }
         byte registerDir = getRegisterDir(bank);
 
-        LOG.debug("set port '" + port + "' as input (mask=" + Integer.toHexString(portMask) + ")");
+        LOG.debug("set port '{}' as {} (mask={})", port, in == true ? "input" : "output",
+                Integer.toHexString(portMask));
 
         super.open("/dev/i2c-1");
         try {
             int oldValue = super.read(registerDir);
-            LOG.trace("old mask: " + Integer.toHexString(oldValue & 0xFF));
-            byte newValue = (byte) ((oldValue & 0xFF) | portMask);
-            LOG.trace("new mask: " + Integer.toHexString(newValue));
+            LOG.trace("old mask: " + String.format("%02x", oldValue));
+            byte newValue;
+            // 1 is input
+            if (in) {
+                newValue = (byte) ((oldValue & 0xFF) | portMask);
+            } else {
+                newValue = (byte) ((oldValue & 0xFF) & ~portMask);
+            }
+            LOG.trace("new mask: " + String.format("%02x", newValue));
+            if (oldValue == newValue) {
+                LOG.debug("setting not necessary");
+                return;
+            }
             boolean res = super.write(registerDir, newValue);
             if (!res) {
                 throw new IllegalStateException("cannot set port as input, error='" + res + "'");
             }
+            directionSetList.add(bank + "" + port);
         } finally {
             super.close();
         }
-    }
-
-    private void read(byte address, byte portMask, char bank, EventPublisher eventPublisher, String itemName,
-            Class<? extends Item> itemType) {
-
     }
 
     private static void updateItem(EventPublisher eventPublisher, String itemName, boolean on,
@@ -202,14 +220,14 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
                 MCP23016Device.this.open("/dev/i2c-1");
                 int read = -1;
                 try {
-                    read = (MCP23016Device.this.read((byte) registerSwitch) & 0xFF);
-                    LOG.trace("read value: " + Integer.toHexString(read & 0xFF));
+                    read = (MCP23016Device.this.read(registerSwitch) & 0xFF);
+                    LOG.trace("read value '{}' for portmask: {}", String.format("%02x", (read & 0xFF)), portMask);
                 } finally {
                     MCP23016Device.this.close();
                 }
 
                 byte result = (byte) ((read & 0xFF) & portMask);
-                LOG.trace("result: " + Integer.toHexString(result));
+                LOG.trace("result: " + String.format("%02x", result));
                 boolean newState = result == portMask;
                 if (lastState != newState) {
                     if (newState) {
