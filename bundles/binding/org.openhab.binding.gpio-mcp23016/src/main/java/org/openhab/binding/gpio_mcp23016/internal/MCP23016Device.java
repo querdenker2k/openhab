@@ -23,7 +23,7 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
     private static final Logger LOG = LoggerFactory.getLogger(MCP23016Device.class);
 
     private ExecutorService executors = Executors.newCachedThreadPool();
-    private Map<Byte, Runnable> pollingMap = new HashMap<Byte, Runnable>();
+    private Map<String, PollingThread> pollingMap = new HashMap<String, PollingThread>();
     private List<String> directionSetList = new ArrayList<String>();
 
     public MCP23016Device(MCP23016Config config) {
@@ -31,18 +31,20 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
     }
 
     public void startPolling(final MCP23016ItemConfig itemConfig, final EventPublisher eventPublisher) {
-        if (pollingMap.containsKey(itemConfig.getPort())) {
-            // it's already polling
-            return;
-        }
-
         final byte portMask = (byte) (0x01 << itemConfig.getPort());
         this.setDirection(portMask, itemConfig.getPort(), itemConfig.getBank(), true);
 
-        PollingThread run = new PollingThread(portMask, itemConfig.getBank(), eventPublisher,
-                itemConfig.getItem().getName(), itemConfig.getItem().getClass(), itemConfig.getPollInterval());
-        this.pollingMap.put(itemConfig.getPort(), run);
-        this.executors.execute(run);
+        String key = itemConfig.getId() + itemConfig.getBank();
+        if (!pollingMap.containsKey(key)) {
+            LOG.debug("starting new thread for id={}, address={}, pollInterval={}", key, getConfig().getAddress(),
+                    getConfig().getPollInterval());
+            PollingThread run = new PollingThread(itemConfig.getBank(), eventPublisher, getConfig().getPollInterval());
+            this.pollingMap.put(key, run);
+            // this.executors.execute(run);
+        }
+
+        PollingThread run = pollingMap.get(key);
+        run.addPollingData(new PollingData(portMask, itemConfig.getItem().getName(), itemConfig.getItem().getClass()));
     }
 
     public void stopPolling() {
@@ -146,7 +148,7 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
 
         super.open("/dev/i2c-1");
         try {
-            int oldValue = super.read(registerDir);
+            byte oldValue = (byte) (super.read(registerDir) & 0xFF);
             LOG.trace("old mask: " + String.format("%02x", oldValue));
             byte newValue;
             // 1 is input
@@ -158,6 +160,7 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
             LOG.trace("new mask: " + String.format("%02x", newValue));
             if (oldValue == newValue) {
                 LOG.debug("setting not necessary");
+                directionSetList.add(bank + "" + port);
                 return;
             }
             boolean res = super.write(registerDir, newValue);
@@ -190,24 +193,38 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
 
     }
 
-    class PollingThread extends Thread {
+    class PollingData {
         private final byte portMask;
-        private final char bank;
-        private final EventPublisher eventPublisher;
         private final String itemName;
         private final Class<? extends Item> itemType;
-        private final int pollInterval;
 
-        public PollingThread(byte portMask, char bank, EventPublisher eventPublisher, String itemName,
-                Class<? extends Item> itemType, int pollInterval) {
+        public PollingData(byte portMask, String itemName, Class<? extends Item> itemType) {
             super();
             this.portMask = portMask;
-            this.bank = bank;
-            this.eventPublisher = eventPublisher;
             this.itemName = itemName;
             this.itemType = itemType;
+        }
+    }
+
+    class PollingThread extends Thread {
+        private final char bank;
+        private final EventPublisher eventPublisher;
+        private final int pollInterval;
+        private Map<String, PollingData> pollingDataMap = new HashMap<>();
+
+        public PollingThread(char bank, EventPublisher eventPublisher, int pollInterval) {
+            super();
+            this.bank = bank;
+            this.eventPublisher = eventPublisher;
             this.pollInterval = pollInterval;
-            LOG.debug("new polling thread created for item: {}", itemName);
+            LOG.debug("new polling thread created for bank: {}", bank);
+        }
+
+        public void addPollingData(PollingData pollingData) {
+            if (!this.pollingDataMap.containsKey(pollingData.itemName)) {
+                LOG.debug("adding polling for data: {}", pollingData);
+                this.pollingDataMap.put(pollingData.itemName, pollingData);
+            }
         }
 
         @Override
@@ -221,21 +238,25 @@ public class MCP23016Device extends I2CDevice<MCP23016Config, MCP23016ItemConfig
                 int read = -1;
                 try {
                     read = (MCP23016Device.this.read(registerSwitch) & 0xFF);
-                    LOG.trace("read value '{}' for portmask: {}", String.format("%02x", (read & 0xFF)), portMask);
+                    LOG.trace("read value '{}'", String.format("%02x", (read & 0xFF)));
                 } finally {
                     MCP23016Device.this.close();
                 }
 
-                byte result = (byte) ((read & 0xFF) & portMask);
-                LOG.trace("result: " + String.format("%02x", result));
-                boolean newState = result == portMask;
-                if (lastState != newState) {
-                    if (newState) {
-                        updateItem(eventPublisher, itemName, true, itemType);
-                    } else {
-                        updateItem(eventPublisher, itemName, false, itemType);
+                for (PollingData pollingData : pollingDataMap.values()) {
+                    byte result = (byte) ((read & 0xFF) & pollingData.portMask);
+                    boolean newState = result == pollingData.portMask;
+                    LOG.trace("result for pin ({}): {} -> {}", pollingData.portMask, String.format("%02x", result),
+                            newState);
+
+                    if (lastState != newState) {
+                        if (newState) {
+                            updateItem(eventPublisher, pollingData.itemName, true, pollingData.itemType);
+                        } else {
+                            updateItem(eventPublisher, pollingData.itemName, false, pollingData.itemType);
+                        }
+                        lastState = newState;
                     }
-                    lastState = newState;
                 }
 
                 try {

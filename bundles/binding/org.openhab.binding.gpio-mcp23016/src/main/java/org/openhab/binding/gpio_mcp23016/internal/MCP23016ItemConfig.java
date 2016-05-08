@@ -8,19 +8,17 @@ public class MCP23016ItemConfig extends GpioI2CItemConfig {
     private byte port;
     private char bank;
     private boolean in;
-    private int pollInterval;
 
     public MCP23016ItemConfig() {
         super();
     }
 
-    public MCP23016ItemConfig(Item item, String id, byte port, char bank, boolean in, int pollInterval) {
+    public MCP23016ItemConfig(Item item, String id, byte port, char bank, boolean in) {
         super(item);
         this.id = id;
         this.port = port;
         this.bank = bank;
         this.in = in;
-        this.pollInterval = pollInterval;
     }
 
     public byte getPort() {
@@ -45,14 +43,6 @@ public class MCP23016ItemConfig extends GpioI2CItemConfig {
 
     public void setIn(boolean in) {
         this.in = in;
-    }
-
-    public int getPollInterval() {
-        return pollInterval;
-    }
-
-    public void setPollInterval(int pollInterval) {
-        this.pollInterval = pollInterval;
     }
 
     public String getId() {

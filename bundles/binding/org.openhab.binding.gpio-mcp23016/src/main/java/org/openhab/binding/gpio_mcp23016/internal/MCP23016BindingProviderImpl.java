@@ -29,7 +29,6 @@ public class MCP23016BindingProviderImpl extends AbstractGenericBindingProvider 
     private static final String PROP_PORT = "port";
     private static final String PROP_BANK = "bank";
     private static final String PROP_IN = "in";
-    private static final String PROP_POLL_INTERVAL = "pollInterval";
     private static final String PROP_ID = "id";
 
     /**
@@ -64,7 +63,6 @@ public class MCP23016BindingProviderImpl extends AbstractGenericBindingProvider 
         Byte port = null;
         Character bank = null;
         boolean in = false;
-        int pollInterval = 100;
 
         String[] configParts = bindingConfig.split(" ");
         for (String configPart : configParts) {
@@ -75,8 +73,6 @@ public class MCP23016BindingProviderImpl extends AbstractGenericBindingProvider 
                 bank = (configPartSplit[1]).charAt(0);
             } else if (configPartSplit[0].equals(PROP_IN)) {
                 in = Boolean.parseBoolean(configPartSplit[1] + "");
-            } else if (configPartSplit[0].equals(PROP_POLL_INTERVAL)) {
-                pollInterval = Integer.parseInt(configPartSplit[1] + "");
             } else if (configPartSplit[0].equals(PROP_ID)) {
                 id = configPartSplit[1] + "";
             }
@@ -86,7 +82,7 @@ public class MCP23016BindingProviderImpl extends AbstractGenericBindingProvider 
         logger.debug("port: " + port);
         logger.debug("bank: " + bank);
         logger.debug("in: " + in);
-        logger.debug("pollInterval: " + pollInterval);
+        logger.debug("------------");
 
         if (id == null) {
             logger.error("id is not configured, but required");
@@ -102,7 +98,7 @@ public class MCP23016BindingProviderImpl extends AbstractGenericBindingProvider 
         }
 
         logger.debug("reading item: " + item);
-        super.bindingConfigs.put(item.getName(), new MCP23016ItemConfig(item, id, port, bank, in, pollInterval));
+        super.bindingConfigs.put(item.getName(), new MCP23016ItemConfig(item, id, port, bank, in));
     }
 
     @Override

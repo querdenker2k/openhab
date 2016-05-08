@@ -39,6 +39,7 @@ public class MCP23016Binding extends AbstractActiveBinding<MCP23016BindingProvid
     private static final Logger logger = LoggerFactory.getLogger(MCP23016Binding.class);
 
     private static final String PROP_ADDRESS = "address";
+    private static final String PROP_POLL_INTERVAL = "pollInterval";
 
     private long minimumRefresh = 5000;
 
@@ -116,27 +117,40 @@ public class MCP23016Binding extends AbstractActiveBinding<MCP23016BindingProvid
         if (properties != null) {
             logger.info("loading configuration");
             Enumeration<String> keys = properties.keys();
+            Map<String, MCP23016Config> configMap = new HashMap<>();
             while (keys.hasMoreElements()) {
                 String key = keys.nextElement();
                 if (!key.equals("service.pid")) {
                     logger.trace("reading config entry: {}", key);
                     String[] split = key.split("\\.");
+                    String id = split[0];
+                    if (!configMap.containsKey(id)) {
+                        configMap.put(id, new MCP23016Config(id));
+                    }
+
                     if (split[1].equals(PROP_ADDRESS)) {
                         byte address = Byte.parseByte((String) properties.get(key), 16);
-                        String id = split[0];
-
-                        logger.debug("id: " + id);
-                        logger.debug("address: " + address);
-
-                        MCP23016Config config = new MCP23016Config(id, address);
-
-                        try {
-                            this.deviceMap.put(id,
-                                    (MCP23016Device) this.gpioLoader.createI2CDevice(config, MCP23016Device.class));
-                        } catch (GpioException e) {
-                            logger.error(e.getMessage());
-                        }
+                        configMap.get(id).setAddress(address);
+                    } else if (split[1].equals(PROP_POLL_INTERVAL)) {
+                        int pollInterval = Integer.parseInt(properties.get(key) + "");
+                        configMap.get(id).setPollInterval(pollInterval);
                     }
+                }
+            }
+
+            for (String id : configMap.keySet()) {
+                MCP23016Config mcp23016Config = configMap.get(id);
+                logger.debug("******************");
+                logger.debug("id: " + mcp23016Config.getId());
+                logger.debug("address: " + String.format("%02x", mcp23016Config.getAddress()));
+                logger.debug("pollInterval: " + mcp23016Config.getPollInterval());
+                logger.debug("******************");
+
+                try {
+                    this.deviceMap.put(id,
+                            (MCP23016Device) this.gpioLoader.createI2CDevice(mcp23016Config, MCP23016Device.class));
+                } catch (GpioException e) {
+                    logger.error(e.getMessage());
                 }
 
             }
