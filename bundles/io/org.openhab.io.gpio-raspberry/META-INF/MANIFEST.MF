@@ -15,7 +15,7 @@ Import-Package: org.openhab.core.binding,
  org.osgi.service.cm,
  org.slf4j
 Bundle-ClassPath: .,
- lib/pi4j-core-1.0-SNAPSHOT.jar
+ lib/pi4j-core.jar
 Service-Component: OSGI-INF/gpioloader.xml
 Bundle-Activator: org.openhab.io.gpio_raspberry.internal.GpioActivator
 Export-Package: org.openhab.io.gpio_raspberry;uses:="org.openhab.io.gpio_raspberry.internal.device",
