@@ -12,6 +12,7 @@ Bundle-Description: This is the CalDav enhancement of the open Home Aut
 Import-Package: com.google.common.collect,
  org.apache.commons.codec,
  org.apache.commons.codec.binary,
+ org.apache.commons.codec.digest;version="1.6.0",
  org.apache.commons.codec.net,
  org.apache.commons.io,
  org.apache.commons.lang,

@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.joda.time.DateTime;
 import org.openhab.io.caldav.CalDavEvent;
 
 public final class EventStorage {
@@ -35,7 +36,7 @@ public final class EventStorage {
 
     /**
      * Containing all events for a specific calendar and the config for the calendar.
-     * 
+     *
      * @author Robert
      *
      */
@@ -43,6 +44,8 @@ public final class EventStorage {
         private final ConcurrentHashMap<String, EventContainer> eventMap = new ConcurrentHashMap<String, EventContainer>();
 
         private CalDavConfig config;
+        private String lastGenUID;
+        private DateTime lastResourceChange;
 
         public EventContainer getEventContainerByFilename(String filename) {
             for (EventContainer eventContainer : eventMap.values()) {
@@ -64,12 +67,29 @@ public final class EventStorage {
         public void setConfig(CalDavConfig config) {
             this.config = config;
         }
+
+        public String getLastGenUID() {
+            return lastGenUID;
+        }
+
+        public void setLastGenUID(String lastGenUID) {
+            this.lastGenUID = lastGenUID;
+        }
+
+        public DateTime getLastResourceChange() {
+            return lastResourceChange;
+        }
+
+        public void setLastResourceChange(DateTime lastResourceChange) {
+            this.lastResourceChange = lastResourceChange;
+        }
+
     }
 
     /**
      * A container for a event.
      * Each event can have multiple occurrences.
-     * 
+     *
      * @author Robert Delbrück
      *
      */

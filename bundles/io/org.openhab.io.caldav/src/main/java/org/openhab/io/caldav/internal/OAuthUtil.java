@@ -93,7 +93,7 @@ public class OAuthUtil {
         }
     }
 
-    public static void refreshToken(String clientId, String clientSecret, String refreshToken)
+    public static void refreshToken(String calendarId, String clientId, String clientSecret, String refreshToken)
             throws URISyntaxException {
         try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
             URIBuilder builder = new URIBuilder();
@@ -104,7 +104,12 @@ public class OAuthUtil {
             HttpPost post = new HttpPost(builder.build());
             post.addHeader("Content-Type", "application/x-www-form-urlencoded");
             HttpResponse result = httpClient.execute(post);
-            if (result.getStatusLine().getStatusCode() != 200) {
+            if (result.getStatusLine().getStatusCode() == 200) {
+                JSONObject jsonObject = new JSONObject(EntityUtils.toString(result.getEntity()));
+
+                String accessToken = jsonObject.getString("access_token");
+                runtimeData.setAuthenticationBearer(calendarId, accessToken);
+            } else {
                 return;
             }
         } catch (IOException ex) {
@@ -125,7 +130,7 @@ public class OAuthUtil {
             } else if (result.getStatusLine().getStatusCode() == 401) {
                 String refreshToken = runtimeData.getRefreshToken(calendarId);
                 if (refreshToken != null) {
-                    refreshToken(clientId, clientSecret, refreshToken);
+                    refreshToken(calendarId, clientId, clientSecret, refreshToken);
                     return getCalendars(calendarId, clientId, clientSecret, url);
                 } else {
                     if (requestAccess(clientId)) {

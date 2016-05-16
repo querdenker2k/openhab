@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
 import org.joda.time.DateTimeZone;
@@ -146,7 +147,15 @@ public class EventReloaderJob implements Job {
             String calendar = OAuthUtil.getCalendars(config.getKey(), config.getUsername(), config.getPassword(),
                     config.getUrl());
 
-            this.loadEvents(config.getKey(), null,
+            org.joda.time.DateTime lastResourceChange = org.joda.time.DateTime.now();
+            String newUid = DigestUtils.shaHex(calendar);
+            if (calendarRuntime.getLastGenUID() != null && calendarRuntime.getLastGenUID().equals(newUid)) {
+                lastResourceChange = calendarRuntime.getLastResourceChange();
+            }
+            calendarRuntime.setLastResourceChange(lastResourceChange);
+            calendarRuntime.setLastGenUID(newUid);
+
+            this.loadEvents(config.getKey(), lastResourceChange,
                     new ByteArrayInputStream(calendar.getBytes(Charset.forName("UTF-8"))), config, oldEventIds, false);
         } catch (Exception e) {
             log.error("error loading calendar entries", e);
@@ -299,7 +308,6 @@ public class EventReloaderJob implements Job {
         final UnfoldingReader uin = new UnfoldingReader(in, 50, true);
         Calendar calendar = builder.build(uin);
         uin.close();
-        // log.trace("calendar: {}", calendar);
 
         EventContainer eventContainer = new EventContainer(config.getKey());
         eventContainer.setFilename(filename);
@@ -373,20 +381,7 @@ public class EventReloaderJob implements Job {
             eventContainer.setCalculatedUntil(loadTo);
 
             for (Period p : periods) {
-                org.joda.time.DateTime start = getDateTime("start", p.getStart(), p.getRangeStart());
-                org.joda.time.DateTime end = getDateTime("end", p.getEnd(), p.getRangeEnd());
-
-                CalDavEvent event = new CalDavEvent(eventName, vEvent.getUid().getValue(), config.getKey(), start, end);
-                event.setLastChanged(lastModifedVEvent);
-                if (vEvent.getLocation() != null) {
-                    event.setLocation(vEvent.getLocation().getValue());
-                }
-                if (vEvent.getDescription() != null) {
-                    event.setContent(vEvent.getDescription().getValue());
-                }
-                event.getCategoryList().addAll(readCategory(vEvent));
-                event.setFilename(filename);
-                log.trace("adding event: " + event.getShortName());
+                CalDavEvent event = createEvent(filename, config, vEvent, lastModifedVEvent, eventName, p);
                 eventContainer.getEventList().add(event);
 
             }
@@ -394,12 +389,29 @@ public class EventReloaderJob implements Job {
         if (lastModifedVEventOverAll != null && !config.isLastModifiedFileTimeStampValid()) {
             eventContainer.setLastChanged(lastModifedVEventOverAll);
         }
-        // if (!eventContainer.getEventList().isEmpty()) {
         CalDavLoaderImpl.instance.addEventToMap(eventContainer, true);
         if (!readFromFile) {
             Util.storeToDisk(config.getKey(), filename, calendar);
         }
-        // }
+    }
+
+    private CalDavEvent createEvent(String filename, final CalDavConfig config, VEvent vEvent,
+            org.joda.time.DateTime lastModifedVEvent, final String eventName, Period p) {
+        org.joda.time.DateTime start = getDateTime("start", p.getStart(), p.getRangeStart());
+        org.joda.time.DateTime end = getDateTime("end", p.getEnd(), p.getRangeEnd());
+
+        CalDavEvent event = new CalDavEvent(eventName, vEvent.getUid().getValue(), config.getKey(), start, end);
+        event.setLastChanged(lastModifedVEvent);
+        if (vEvent.getLocation() != null) {
+            event.setLocation(vEvent.getLocation().getValue());
+        }
+        if (vEvent.getDescription() != null) {
+            event.setContent(vEvent.getDescription().getValue());
+        }
+        event.getCategoryList().addAll(readCategory(vEvent));
+        event.setFilename(filename);
+        log.trace("adding event: " + event.getShortName());
+        return event;
     }
 
     /**
