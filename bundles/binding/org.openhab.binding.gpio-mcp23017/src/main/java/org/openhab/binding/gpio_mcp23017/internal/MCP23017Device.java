@@ -192,15 +192,15 @@ public class MCP23017Device extends I2CDevice<MCP23017Config, MCP23017ItemConfig
             Class<? extends Item> itemType) {
         if (itemType.equals(SwitchItem.class)) {
             if (on) {
-                eventPublisher.postUpdate(itemName, OnOffType.ON);
+                eventPublisher.sendCommand(itemName, OnOffType.ON);
             } else {
-                eventPublisher.postUpdate(itemName, OnOffType.OFF);
+                eventPublisher.sendCommand(itemName, OnOffType.OFF);
             }
         } else if (itemType.equals(ContactItem.class)) {
             if (on) {
-                eventPublisher.postUpdate(itemName, OpenClosedType.CLOSED);
+                eventPublisher.sendCommand(itemName, OpenClosedType.CLOSED);
             } else {
-                eventPublisher.postUpdate(itemName, OpenClosedType.OPEN);
+                eventPublisher.sendCommand(itemName, OpenClosedType.OPEN);
             }
         } else {
             throw new IllegalStateException("invalid command type: " + itemType);
@@ -259,7 +259,7 @@ public class MCP23017Device extends I2CDevice<MCP23017Config, MCP23017ItemConfig
                         MCP23017Device.this.close();
                     }
 
-                    for (PollingData pollingData : pollingDataMap.values()) {
+                    for (PollingData pollingData : new ArrayList<>(pollingDataMap.values())) {
                         byte result = (byte) ((read & 0xFF) & pollingData.portMask);
                         boolean newState = result == pollingData.portMask;
                         LOG.trace("result for pin ({}): {} -> {}", pollingData.portMask, String.format("%02x", result),
@@ -276,8 +276,8 @@ public class MCP23017Device extends I2CDevice<MCP23017Config, MCP23017ItemConfig
                             if (pollingData.activeLow) {
                                 stateToSet = !stateToSet;
                             }
-                            LOG.debug("setting pin ({}): {} (activeLow={})", pollingData.portMask,
-                                    stateToSet, pollingData.activeLow);
+                            LOG.debug("setting pin ({}): {} (activeLow={})", pollingData.portMask, stateToSet,
+                                    pollingData.activeLow);
                             updateItem(eventPublisher, pollingData.itemName, stateToSet, pollingData.itemType);
 
                             lastStateMap.put(pollingData.portMask, newState);
