@@ -24,7 +24,6 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 
 import org.apache.commons.lang3.BooleanUtils;
@@ -34,11 +33,12 @@ import org.openhab.io.caldav.CalDavEvent;
 import org.openhab.io.caldav.CalDavLoader;
 import org.openhab.io.caldav.CalDavQuery;
 import org.openhab.io.caldav.EventNotifier;
-import org.openhab.io.caldav.internal.EventStorage.CalendarRuntime;
-import org.openhab.io.caldav.internal.EventStorage.EventContainer;
 import org.openhab.io.caldav.internal.job.EventJob;
 import org.openhab.io.caldav.internal.job.EventJob.EventTrigger;
 import org.openhab.io.caldav.internal.job.EventReloaderJob;
+import org.openhab.io.caldav.internal.model.CalendarFile;
+import org.openhab.io.caldav.internal.model.CalendarRuntime;
+import org.openhab.io.caldav.internal.model.EventContainer;
 import org.osgi.service.cm.ConfigurationException;
 import org.osgi.service.cm.ManagedService;
 import org.quartz.DateBuilder;
@@ -249,9 +249,11 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
 
         // notify for missing changes
         for (CalendarRuntime calendarRuntime : EventStorage.getInstance().getEventCache().values()) {
-            for (EventContainer eventContainer : calendarRuntime.getEventMap().values()) {
-                for (CalDavEvent event : eventContainer.getEventList()) {
-                    notifier.eventLoaded(event);
+            for (CalendarFile calendarFile : calendarRuntime.getCalendarFiles()) {
+                for (EventContainer eventContainer : calendarFile.getEventContainerList()) {
+                    for (CalDavEvent event : eventContainer.getEventList()) {
+                        notifier.eventLoaded(event);
+                    }
                 }
             }
         }
@@ -263,14 +265,10 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
         this.eventListenerList.remove(notifier);
     }
 
-    public synchronized void addEventToMap(EventContainer eventContainer, boolean createTimer) {
-        CalendarRuntime calendarRuntime = EventStorage.getInstance().getEventCache()
-                .get(eventContainer.getCalendarId());
-
-        ConcurrentHashMap<String, EventContainer> eventContainerMap = calendarRuntime.getEventMap();
-
-        if (eventContainerMap.containsKey(eventContainer.getEventId())) {
-            EventContainer eventContainerOld = eventContainerMap.get(eventContainer.getEventId());
+    public synchronized void addEventToMap(String calendarId, CalendarFile calendarFile, EventContainer eventContainer,
+            boolean createTimer) {
+        if (calendarFile.containsEvent(eventContainer.getEventId())) {
+            EventContainer eventContainerOld = calendarFile.getEventContainerForId(eventContainer.getEventId());
             // event is already in map
             if (eventContainer.getLastChanged().isAfter(eventContainerOld.getLastChanged())) {
                 log.debug("event is already in event map and newer -> delete the old one, reschedule timer");
@@ -285,7 +283,7 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
                 eventContainerOld.getTimerMap().clear();
 
                 // override event
-                eventContainerMap.put(eventContainer.getEventId(), eventContainer);
+                calendarFile.addEventContainer(eventContainer);
 
                 for (EventNotifier notifier : eventListenerList) {
                     for (CalDavEvent event : eventContainerOld.getEventList()) {
@@ -313,7 +311,7 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
                     for (CalDavEvent event : eventContainer.getEventList()) {
                         if (event.getEnd().isAfterNow()) {
                             try {
-                                createJob(eventContainer, event, index);
+                                createJob(calendarId, calendarFile, eventContainer, event, index);
                             } catch (SchedulerException e) {
                                 log.error("cannot create jobs for event '{}': ", event.getShortName(), e.getMessage());
                             }
@@ -326,7 +324,7 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
             }
         } else {
             // event is new
-            eventContainerMap.put(eventContainer.getEventId(), eventContainer);
+            calendarFile.addEventContainer(eventContainer);
             log.trace("listeners for events: {}", eventListenerList.size());
             for (EventNotifier notifier : eventListenerList) {
                 for (CalDavEvent event : eventContainer.getEventList()) {
@@ -343,7 +341,7 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
                 for (CalDavEvent event : eventContainer.getEventList()) {
                     if (event.getEnd().isAfterNow()) {
                         try {
-                            createJob(eventContainer, event, index);
+                            createJob(calendarId, calendarFile, eventContainer, event, index);
                         } catch (SchedulerException e) {
                             log.error("cannot create jobs for event: " + event.getShortName());
                         }
@@ -354,8 +352,8 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
         }
     }
 
-    private synchronized void createJob(final EventContainer eventContainer, final CalDavEvent event, final int index)
-            throws SchedulerException {
+    private synchronized void createJob(String calendarId, CalendarFile calendarFile,
+            final EventContainer eventContainer, final CalDavEvent event, final int index) throws SchedulerException {
         final String triggerStart = JOB_NAME_EVENT_START + "-" + event.getShortName() + "-" + index;
 
         final boolean startJobTriggerDeleted = this.scheduler
@@ -364,8 +362,8 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
         log.trace("old start job ({}) deleted? {}/{}", triggerStart, startJobDeleted, startJobTriggerDeleted);
 
         Date startDate = event.getStart().toDate();
-        JobDetail jobStart = JobBuilder.newJob().ofType(EventJob.class)
-                .usingJobData(EventJob.KEY_CONFIG, eventContainer.getCalendarId())
+        JobDetail jobStart = JobBuilder.newJob().ofType(EventJob.class).usingJobData(EventJob.KEY_CONFIG, calendarId)
+                .usingJobData(EventJob.KEY_FILENAME, calendarFile.getFilename())
                 .usingJobData(EventJob.KEY_EVENT, eventContainer.getEventId())
                 .usingJobData(EventJob.KEY_REC_INDEX, index)
                 .usingJobData(EventJob.KEY_EVENT_TRIGGER, EventTrigger.BEGIN.name()).storeDurably(false)
@@ -385,8 +383,8 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
         log.trace("old end job ({}) deleted? {}/{}", triggerEnd, endJobDeleted, endJobTriggerDeleted);
 
         Date endDate = event.getEnd().toDate();
-        JobDetail jobEnd = JobBuilder.newJob().ofType(EventJob.class)
-                .usingJobData(EventJob.KEY_CONFIG, eventContainer.getCalendarId())
+        JobDetail jobEnd = JobBuilder.newJob().ofType(EventJob.class).usingJobData(EventJob.KEY_CONFIG, calendarId)
+                .usingJobData(EventJob.KEY_FILENAME, calendarFile.getFilename())
                 .usingJobData(EventJob.KEY_EVENT, eventContainer.getEventId())
                 .usingJobData(EventJob.KEY_REC_INDEX, index)
                 .usingJobData(EventJob.KEY_EVENT_TRIGGER, EventTrigger.END.name()).storeDurably(false)
@@ -448,6 +446,7 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
         final CalendarRuntime calendarRuntime = EventStorage.getInstance().getEventCache()
                 .get(calDavEvent.getCalendarId());
         CalDavConfig config = calendarRuntime.getConfig();
+
         if (config == null) {
             log.error("cannot find config for calendar id: {}", calDavEvent.getCalendarId());
         }
@@ -457,7 +456,7 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
 
         try {
             final String fullIcsFile = config.getUrl() + "/" + calDavEvent.getFilename() + ".ics";
-            if (calendarRuntime.getEventContainerByFilename(calDavEvent.getFilename()) != null) {
+            if (calendarRuntime.getCalendarFileByFilename(calDavEvent.getFilename()) != null) {
                 log.debug("event will be updated: {}", fullIcsFile);
                 try {
                     sardine.delete(fullIcsFile);
@@ -470,12 +469,12 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
 
             sardine.put(fullIcsFile, calendar.toString().getBytes("UTF-8"));
 
-            EventContainer eventContainer = new EventContainer(calDavEvent.getCalendarId());
-            eventContainer.setEventId(calDavEvent.getId());
-            eventContainer.setFilename(Util.getFilename(calDavEvent.getFilename()));
+            CalendarFile calendarFile = new CalendarFile(Util.getFilename(calDavEvent.getFilename()));
+            EventContainer eventContainer = new EventContainer(calDavEvent.getId(), calDavEvent.getLastChanged(),
+                    org.joda.time.DateTime.now().plusMinutes(config.getPreloadMinutes()));
+            calendarFile.addEventContainer(eventContainer);
             eventContainer.getEventList().add(calDavEvent);
-            eventContainer.setLastChanged(calDavEvent.getLastChanged());
-            this.addEventToMap(eventContainer, false);
+            this.addEventToMap(calDavEvent.getCalendarId(), calendarFile, eventContainer, false);
         } catch (UnsupportedEncodingException e) {
             log.error("cannot write event", e);
         } catch (IOException e) {
@@ -496,33 +495,35 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
                     continue;
                 }
 
-                for (EventContainer eventContainer : eventRuntime.getEventMap().values()) {
-                    for (CalDavEvent calDavEvent : eventContainer.getEventList()) {
-                        if (query.getFrom() != null) {
-                            if (calDavEvent.getEnd().isBefore(query.getFrom())) {
-                                continue;
-                            }
-                        }
-                        if (query.getTo() != null) {
-                            if (calDavEvent.getStart().isAfter(query.getTo())) {
-                                continue;
-                            }
-                        }
-                        if (query.getFilterName() != null) {
-                            if (!calDavEvent.getName().matches(query.getFilterName())) {
-                                continue;
-                            }
-                        }
-                        if (query.getFilterCategory() != null) {
-                            if (calDavEvent.getCategoryList() == null) {
-                                continue;
-                            } else {
-                                if (!calDavEvent.getCategoryList().containsAll(query.getFilterCategory())) {
+                for (CalendarFile calendarFile : eventRuntime.getCalendarFiles()) {
+                    for (EventContainer eventContainer : calendarFile.getEventContainerList()) {
+                        for (CalDavEvent calDavEvent : eventContainer.getEventList()) {
+                            if (query.getFrom() != null) {
+                                if (calDavEvent.getEnd().isBefore(query.getFrom())) {
                                     continue;
                                 }
                             }
+                            if (query.getTo() != null) {
+                                if (calDavEvent.getStart().isAfter(query.getTo())) {
+                                    continue;
+                                }
+                            }
+                            if (query.getFilterName() != null) {
+                                if (!calDavEvent.getName().matches(query.getFilterName())) {
+                                    continue;
+                                }
+                            }
+                            if (query.getFilterCategory() != null) {
+                                if (calDavEvent.getCategoryList() == null) {
+                                    continue;
+                                } else {
+                                    if (!calDavEvent.getCategoryList().containsAll(query.getFilterCategory())) {
+                                        continue;
+                                    }
+                                }
+                            }
+                            eventList.add(calDavEvent);
                         }
-                        eventList.add(calDavEvent);
                     }
                 }
             }
