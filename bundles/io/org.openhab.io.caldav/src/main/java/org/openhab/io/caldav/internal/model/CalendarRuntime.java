@@ -18,12 +18,13 @@ public class CalendarRuntime {
     private CalDavConfig config;
 
     public CalendarFile getCalendarFileByFilename(String filename) {
-        for (CalendarFile calendarFile : calendarFileMap.values()) {
-            if (calendarFile.getFilename().equals(filename)) {
-                return calendarFile;
-            }
-        }
-        return null;
+        return calendarFileMap.get(filename);
+        // for (CalendarFile calendarFile : calendarFileMap.values()) {
+        // if (calendarFile.getFilename().equals(filename)) {
+        // return calendarFile;
+        // }
+        // }
+        // return null;
     }
 
     public List<CalendarFile> getCalendarFiles() {

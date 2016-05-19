@@ -8,19 +8,20 @@
  */
 package org.openhab.io.caldav.internal.job;
 
-import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.StringReader;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
 import org.joda.time.DateTimeZone;
@@ -47,9 +48,7 @@ import com.github.sardine.DavResource;
 import com.github.sardine.Sardine;
 import com.github.sardine.impl.SardineException;
 
-import net.fortuna.ical4j.data.CalendarBuilder;
 import net.fortuna.ical4j.data.ParserException;
-import net.fortuna.ical4j.data.UnfoldingReader;
 import net.fortuna.ical4j.model.Calendar;
 import net.fortuna.ical4j.model.Component;
 import net.fortuna.ical4j.model.ComponentList;
@@ -73,36 +72,58 @@ public class EventReloaderJob implements Job {
         final String config = context.getJobDetail().getJobDataMap().getString(KEY_CONFIG);
         CalendarRuntime eventRuntime = EventStorage.getInstance().getEventCache().get(config);
 
+        // if (config.equals("openhab_tasks")) {
+        // String calendarTmp = Util
+        // .createCalendar(new CalDavEvent("test-aaaaaaaaa", "aaaaaaaaaaa", "calendar",
+        // org.joda.time.DateTime.now(), org.joda.time.DateTime.now().plusHours(1)), DateTimeZone.UTC)
+        // .toString();
+        // try {
+        // OAuthUtil.addEvent(eventRuntime.getConfig().getKey(), eventRuntime.getConfig().getUsername(),
+        // eventRuntime.getConfig().getPassword(), eventRuntime.getConfig().getUrl() + "/test-aaaaaaaaa",
+        // calendarTmp);
+        // } catch (URISyntaxException e1) {
+        // // TODO Auto-generated catch block
+        // e1.printStackTrace();
+        // }
+        // }
+
         // reload cached events (if necessary)
-        // if (!cachedEventsLoaded.containsKey(config)) {
-        // try {
-        // log.debug("reload cached events for config: {}", eventRuntime.getConfig().getKey());
-        // for (File fileCalendarKeys : new File(CalDavLoaderImpl.CACHE_PATH).listFiles()) {
-        // if (!eventRuntime.getConfig().getKey().equals(Util.getFilename(fileCalendarKeys.getName()))) {
-        // continue;
-        // }
-        // final Collection<File> icsFiles = FileUtils.listFiles(fileCalendarKeys, new String[] { "ics" },
-        // false);
-        // for (File icsFile : icsFiles) {
-        // try {
-        // FileInputStream fis = new FileInputStream(icsFile);
-        // loadEvents(Util.getFilename(icsFile.getAbsolutePath()),
-        // new org.joda.time.DateTime(icsFile.lastModified()), fis, eventRuntime.getConfig(),
-        // new ArrayList<String>(), true);
-        // } catch (IOException e) {
-        // log.error("cannot load events for file: " + icsFile, e);
-        // } catch (ParserException e) {
-        // log.error("cannot load events for file: " + icsFile, e);
-        // }
-        // }
-        // break;
-        // }
-        // } catch (Throwable e) {
-        // log.error("cannot load events", e);
-        // } finally {
-        // cachedEventsLoaded.put(config, true);
-        // }
-        // }
+        if (!cachedEventsLoaded.containsKey(config)) {
+            try {
+                log.debug("reload cached events for config: {}", eventRuntime.getConfig().getKey());
+                for (File fileCalendarKeys : new File(CalDavLoaderImpl.CACHE_PATH).listFiles()) {
+                    if (!eventRuntime.getConfig().getKey().equals(Util.getFilename(fileCalendarKeys.getName()))) {
+                        continue;
+                    }
+                    final Collection<File> icsFiles = FileUtils.listFiles(fileCalendarKeys, new String[] { "ics" },
+                            false);
+                    for (File icsFile : icsFiles) {
+                        CalendarFile calendarFile = new CalendarFile(Util.getFilename(icsFile.getAbsolutePath()));
+                        eventRuntime.addCalendarFile(calendarFile);
+                        FileInputStream fis = null;
+                        try {
+                            fis = new FileInputStream(icsFile);
+                            String calendar = IOUtils.toString(fis);
+                            fis.close();
+                            loadEvents(calendarFile, calendar, eventRuntime.getConfig(), new ArrayList<String>());
+                        } catch (IOException e) {
+                            log.error("cannot load events for file: " + icsFile, e);
+                        } catch (ParserException e) {
+                            log.error("cannot load events for file: " + icsFile, e);
+                        } finally {
+                            if (fis != null) {
+                                fis.close();
+                            }
+                        }
+                    }
+                    break;
+                }
+            } catch (Throwable e) {
+                log.error("cannot load events", e);
+            } finally {
+                cachedEventsLoaded.put(config, true);
+            }
+        }
 
         try {
             log.debug("loading events for config: " + config);
@@ -221,19 +242,13 @@ public class EventReloaderJob implements Job {
                 }
             }
 
-            // ConcurrentHashMap<String, EventContainer> eventContainerMap = eventRuntime.getEventMap();
-            // if (eventContainer != null) {
-            // this.removeFromDisk(eventContainer);
-            //
-            // log.debug("remove deleted event: {}", eventContainer.getEventId());
-            // eventContainerMap.remove(eventContainer.getEventId());
-            // }
+            calendarFile.removeEvent(eventId);
+            if (calendarFile.isEmpty()) {
+                Util.getCacheFile(eventRuntime.getConfig().getKey(), filename).delete();
+                eventRuntime.removeCalendarFile(filename);
+            }
         }
     }
-
-    // private void removeFromDisk(EventContainer eventContainer) {
-    // Util.getCacheFile(eventContainer.getCalendarId(), eventContainer.getFilename()).delete();
-    // }
 
     /**
      * all events which are available must be removed from the oldEventIds list
@@ -260,7 +275,7 @@ public class EventReloaderJob implements Job {
                     continue;
                 }
 
-                URL url = createURL(config.getUrl(), resource);
+                URL url = Util.createURL(config.getUrl(), resource);
 
                 // must not be loaded
                 CalendarFile calendarFile = calendarRuntime.getCalendarFileByFilename(filename);
@@ -346,7 +361,9 @@ public class EventReloaderJob implements Job {
 
     private void loadEvents(CalendarFile calendarFile, String calendarStr, CalDavConfig config,
             List<String> oldEventIds) throws IOException, ParserException {
-        Calendar calendar = this.getCalendarObj(calendarStr);
+        Calendar calendar = Util.getCalendarObj(calendarStr);
+
+        Util.storeToDisk(config.getKey(), calendarFile.getFilename(), calendar);
 
         org.joda.time.DateTime loadFrom = org.joda.time.DateTime.now().minusMinutes(config.getHistoricLoadMinutes());
         org.joda.time.DateTime loadTo = org.joda.time.DateTime.now().plusMinutes(config.getPreloadMinutes());
@@ -420,26 +437,6 @@ public class EventReloaderJob implements Job {
             }
         }
         return false;
-    }
-
-    private Calendar getCalendarObj(String calendarStr) throws IOException, ParserException {
-        CalendarBuilder builder = new CalendarBuilder();
-        BufferedReader in = new BufferedReader(new StringReader(calendarStr), 50);
-
-        final UnfoldingReader uin = new UnfoldingReader(in, 50, true);
-        Calendar calendar = builder.build(uin);
-        uin.close();
-        return calendar;
-    }
-
-    private URL createURL(String rootUrl, DavResource resource) throws MalformedURLException {
-        // prepare resource url
-        URL url = new URL(rootUrl);
-        String resourcePath = resource.getPath();
-        String escapedResource = resource.getName().replaceAll("/", "%2F");
-        resourcePath = resourcePath.replace(resource.getName(), escapedResource);
-        url = new URL(url.getProtocol(), url.getHost(), url.getPort(), resourcePath);
-        return url;
     }
 
     private CalDavEvent createEvent(String filename, final CalDavConfig config, VEvent vEvent,

@@ -6,7 +6,9 @@ import java.net.URISyntaxException;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
@@ -145,6 +147,46 @@ public class OAuthUtil {
                         }
                     }
                     return getCalendars(calendarId, clientId, clientSecret, url);
+                }
+            } else {
+                throw new IllegalStateException(
+                        "unknown error access calendar: " + result.getStatusLine().getStatusCode());
+            }
+
+        } catch (IOException ex) {
+            logger.error("error accessing OAuth", ex);
+            throw new IllegalStateException("error accessing OAuth", ex);
+        }
+    }
+
+    public static boolean addEvent(String calendarId, String clientId, String clientSecret, String url, String calendar)
+            throws URISyntaxException {
+        String authenticationBearer = runtimeData.getAuthenticationBearer(calendarId);
+        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+            HttpPut post = new HttpPut(url);
+            post.setEntity(new StringEntity(calendar));
+            post.setHeader("Authorization", "Bearer " + authenticationBearer);
+            HttpResponse result = httpClient.execute(post);
+            if (result.getStatusLine().getStatusCode() == 201) {
+                return true;
+            } else if (result.getStatusLine().getStatusCode() == 401) {
+                String refreshToken = runtimeData.getRefreshToken(calendarId);
+                if (refreshToken != null) {
+                    refreshToken(calendarId, clientId, clientSecret, refreshToken);
+                    return addEvent(calendarId, clientId, clientSecret, url, calendar);
+                } else {
+                    if (requestAccess(clientId)) {
+                        while (true) {
+                            if (poll(calendarId, clientId, clientSecret, deviceCode)) {
+                                break;
+                            }
+                            try {
+                                Thread.sleep(5000);
+                            } catch (InterruptedException e) {
+                            }
+                        }
+                    }
+                    return addEvent(calendarId, clientId, clientSecret, url, calendar);
                 }
             } else {
                 throw new IllegalStateException(

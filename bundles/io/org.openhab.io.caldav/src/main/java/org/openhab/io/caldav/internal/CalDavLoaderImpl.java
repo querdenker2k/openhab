@@ -13,6 +13,7 @@ import static org.quartz.impl.matchers.GroupMatcher.jobGroupEquals;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.URISyntaxException;
 import java.nio.charset.Charset;
 import java.nio.charset.UnsupportedCharsetException;
 import java.util.ArrayList;
@@ -59,7 +60,6 @@ import org.slf4j.LoggerFactory;
 
 import com.github.sardine.Sardine;
 
-import net.fortuna.ical4j.model.Calendar;
 import net.fortuna.ical4j.util.CompatibilityHints;
 
 /**
@@ -402,7 +402,6 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
         }
         log.trace("starting execution...");
 
-        int i = 0;
         for (final CalendarRuntime eventRuntime : EventStorage.getInstance().getEventCache().values()) {
             try {
                 JobDetail job = JobBuilder.newJob().ofType(EventReloaderJob.class)
@@ -412,7 +411,7 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
                 this.scheduler.addJob(job, false);
                 SimpleTrigger jobTrigger = TriggerBuilder.newTrigger().forJob(job)
                         .withIdentity(eventRuntime.getConfig().getKey(), JOB_NAME_EVENT_RELOADER)
-                        .startAt(DateBuilder.futureDate(10 + i, IntervalUnit.SECOND)).withSchedule(SimpleScheduleBuilder
+                        .startAt(DateBuilder.futureDate(10, IntervalUnit.SECOND)).withSchedule(SimpleScheduleBuilder
                                 .repeatMinutelyForever(eventRuntime.getConfig().getReloadMinutes()))
                         .build();
                 this.scheduler.scheduleJob(jobTrigger);
@@ -420,8 +419,6 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
             } catch (SchedulerException e) {
                 log.error("cannot schedule calendar-reloader", e);
             }
-            // next event 10 seconds later
-            i += 10;
         }
 
     }
@@ -449,25 +446,18 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
 
         if (config == null) {
             log.error("cannot find config for calendar id: {}", calDavEvent.getCalendarId());
+            return;
         }
-        Sardine sardine = Util.getConnection(config);
 
-        Calendar calendar = Util.createCalendar(calDavEvent, defaultTimeZone);
+        String calendar = Util.createCalendar(calDavEvent, defaultTimeZone).toString();
 
         try {
-            final String fullIcsFile = config.getUrl() + "/" + calDavEvent.getFilename() + ".ics";
-            if (calendarRuntime.getCalendarFileByFilename(calDavEvent.getFilename()) != null) {
-                log.debug("event will be updated: {}", fullIcsFile);
-                try {
-                    sardine.delete(fullIcsFile);
-                } catch (IOException e) {
-                    log.error("cannot remove old ics file: {}", fullIcsFile);
-                }
+            if (config.isOauth()) {
+                OAuthUtil.addEvent(config.getKey(), config.getUsername(), config.getPassword(), config.getUrl(),
+                        calendar);
             } else {
-                log.debug("event is new: {}", fullIcsFile);
+                this.addEventToCaldav(config, calendarRuntime, calendar, calDavEvent);
             }
-
-            sardine.put(fullIcsFile, calendar.toString().getBytes("UTF-8"));
 
             CalendarFile calendarFile = new CalendarFile(Util.getFilename(calDavEvent.getFilename()));
             EventContainer eventContainer = new EventContainer(calDavEvent.getId(), calDavEvent.getLastChanged(),
@@ -479,7 +469,28 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
             log.error("cannot write event", e);
         } catch (IOException e) {
             log.error("cannot write event", e);
+        } catch (URISyntaxException e) {
+            log.error("cannot write event", e);
         }
+    }
+
+    private void addEventToCaldav(CalDavConfig config, CalendarRuntime calendarRuntime, String calendar,
+            CalDavEvent calDavEvent) throws UnsupportedEncodingException, IOException {
+        Sardine sardine = Util.getConnection(config);
+
+        final String fullIcsFile = config.getUrl() + "/" + calDavEvent.getFilename() + ".ics";
+        if (calendarRuntime.getCalendarFileByFilename(calDavEvent.getFilename()) != null) {
+            log.debug("event will be updated: {}", fullIcsFile);
+            try {
+                sardine.delete(fullIcsFile);
+            } catch (IOException e) {
+                log.error("cannot remove old ics file: {}", fullIcsFile);
+            }
+        } else {
+            log.debug("event is new: {}", fullIcsFile);
+        }
+
+        sardine.put(fullIcsFile, calendar.getBytes("UTF-8"));
     }
 
     @Override
