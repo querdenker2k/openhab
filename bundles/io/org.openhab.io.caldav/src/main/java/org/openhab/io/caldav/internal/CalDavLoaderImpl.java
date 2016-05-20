@@ -453,8 +453,8 @@ public class CalDavLoaderImpl extends AbstractActiveService implements ManagedSe
 
         try {
             if (config.isOauth()) {
-                OAuthUtil.addEvent(config.getKey(), config.getUsername(), config.getPassword(), config.getUrl(),
-                        calendar);
+                OAuthUtil.addEvent(config.getKey(), config.getUsername(), config.getPassword(),
+                        config.getUrl() + "/" + calDavEvent.getName(), calendar);
             } else {
                 this.addEventToCaldav(config, calendarRuntime, calendar, calDavEvent);
             }

@@ -78,7 +78,7 @@ public class EventReloaderJob implements Job {
         // org.joda.time.DateTime.now(), org.joda.time.DateTime.now().plusHours(1)), DateTimeZone.UTC)
         // .toString();
         // try {
-        // OAuthUtil.addEvent(eventRuntime.getConfig().getKey(), eventRuntime.getConfig().getUsername(),
+        // OAuthUtil.removeEvent(eventRuntime.getConfig().getKey(), eventRuntime.getConfig().getUsername(),
         // eventRuntime.getConfig().getPassword(), eventRuntime.getConfig().getUrl() + "/test-aaaaaaaaa",
         // calendarTmp);
         // } catch (URISyntaxException e1) {

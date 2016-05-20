@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 
 import org.apache.http.HttpResponse;
+import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
@@ -187,6 +188,46 @@ public class OAuthUtil {
                         }
                     }
                     return addEvent(calendarId, clientId, clientSecret, url, calendar);
+                }
+            } else {
+                throw new IllegalStateException(
+                        "unknown error access calendar: " + result.getStatusLine().getStatusCode());
+            }
+
+        } catch (IOException ex) {
+            logger.error("error accessing OAuth", ex);
+            throw new IllegalStateException("error accessing OAuth", ex);
+        }
+    }
+
+    public static boolean removeEvent(String calendarId, String clientId, String clientSecret, String url,
+            String calendar) throws URISyntaxException {
+        String authenticationBearer = runtimeData.getAuthenticationBearer(calendarId);
+        try (CloseableHttpClient httpClient = HttpClientBuilder.create().build()) {
+            HttpDelete post = new HttpDelete(url);
+            // post.setEntity(new StringEntity(calendar));
+            post.setHeader("Authorization", "Bearer " + authenticationBearer);
+            HttpResponse result = httpClient.execute(post);
+            if (result.getStatusLine().getStatusCode() == 201) {
+                return true;
+            } else if (result.getStatusLine().getStatusCode() == 401) {
+                String refreshToken = runtimeData.getRefreshToken(calendarId);
+                if (refreshToken != null) {
+                    refreshToken(calendarId, clientId, clientSecret, refreshToken);
+                    return removeEvent(calendarId, clientId, clientSecret, url, calendar);
+                } else {
+                    if (requestAccess(clientId)) {
+                        while (true) {
+                            if (poll(calendarId, clientId, clientSecret, deviceCode)) {
+                                break;
+                            }
+                            try {
+                                Thread.sleep(5000);
+                            } catch (InterruptedException e) {
+                            }
+                        }
+                    }
+                    return removeEvent(calendarId, clientId, clientSecret, url, calendar);
                 }
             } else {
                 throw new IllegalStateException(
