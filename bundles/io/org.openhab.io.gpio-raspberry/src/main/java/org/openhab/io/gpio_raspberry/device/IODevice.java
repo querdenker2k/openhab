@@ -21,6 +21,7 @@ import com.pi4j.io.gpio.PinState;
 import com.pi4j.io.gpio.RaspiPin;
 import com.pi4j.io.gpio.event.GpioPinDigitalStateChangeEvent;
 import com.pi4j.io.gpio.event.GpioPinListenerDigital;
+import com.pi4j.io.gpio.exception.GpioPinExistsException;
 
 public class IODevice extends Device<IOConfig, GpioIOItemConfig> {
     private static final Logger LOG = LoggerFactory.getLogger(IODevice.class);
@@ -34,22 +35,39 @@ public class IODevice extends Device<IOConfig, GpioIOItemConfig> {
 
     public IODevice(IOConfig config) {
         super(config);
+
+        GpioController instance = GpioFactory.getInstance();
+        instance.removeAllListeners();
+        instance.removeAllTriggers();
+        instance.unexportAll();
     }
 
     public void startPolling(final GpioIOItemConfig itemConfig, final EventPublisher eventPublisher) {
+        if (pinOutputMap.containsKey(itemConfig.getPort())) {
+            throw new IllegalArgumentException(
+                    String.format("port '%s' is already defined as output", itemConfig.getPort()));
+        }
+
         GpioController controller = GpioFactory.getInstance();
         GpioPinDigitalInput pin = null;
-        if (this.pinInputMap.containsKey(itemConfig.getPort())) {
-            pin = pinInputMap.get(itemConfig.getPort());
-        } else {
-            final Pin raspiPin = this.getRaspiPin(itemConfig.getPort());
-            LOG.debug("resolved to raspi-pin: " + raspiPin);
-            PinPullResistance pinPullResistance = PinPullResistance.PULL_DOWN;
-            if (itemConfig.isActiveLow()) {
-                pinPullResistance = PinPullResistance.PULL_UP;
+        synchronized (pinInputMap) {
+            if (this.pinInputMap.containsKey(itemConfig.getPort())) {
+                pin = pinInputMap.get(itemConfig.getPort());
+            } else {
+                final Pin raspiPin = this.getRaspiPin(itemConfig.getPort());
+                LOG.debug("resolved to raspi-pin: " + raspiPin);
+                PinPullResistance pinPullResistance = PinPullResistance.PULL_DOWN;
+                if (itemConfig.isActiveLow()) {
+                    pinPullResistance = PinPullResistance.PULL_UP;
+                }
+                try {
+                    pin = controller.provisionDigitalInputPin(raspiPin, pinPullResistance);
+                } catch (GpioPinExistsException e) {
+                    LOG.warn("pin already exists", e);
+                    return;
+                }
+                pinInputMap.put(itemConfig.getPort(), pin);
             }
-            pin = controller.provisionDigitalInputPin(raspiPin, pinPullResistance);
-            pinInputMap.put(itemConfig.getPort(), pin);
         }
 
         if (pin.getListeners().size() > 0) {
@@ -74,9 +92,9 @@ public class IODevice extends Device<IOConfig, GpioIOItemConfig> {
                 }
 
                 if (on) {
-                    eventPublisher.sendCommand(itemConfig.getItemName(), OnOffType.ON);
+                    eventPublisher.postUpdate(itemConfig.getItemName(), OnOffType.ON);
                 } else {
-                    eventPublisher.sendCommand(itemConfig.getItemName(), OnOffType.OFF);
+                    eventPublisher.postUpdate(itemConfig.getItemName(), OnOffType.OFF);
                 }
 
                 timeLastAction = System.currentTimeMillis();
@@ -95,21 +113,32 @@ public class IODevice extends Device<IOConfig, GpioIOItemConfig> {
     @Override
     public State communicate(Command command, GpioIOItemConfig itemConfig, State state) {
         try {
+            if (pinInputMap.containsKey(itemConfig.getPort())) {
+                LOG.debug(String.format("port '{}' is already defined as input", itemConfig.getPort()));
+                return null;
+            }
+
             LOG.debug("communicate with gpio device");
             GpioController controller = GpioFactory.getInstance();
             LOG.debug("GPIO controller created");
             LOG.debug("setting output pin...");
             GpioPinDigitalOutput pin = null;
-            if (this.pinOutputMap.containsKey(itemConfig.getPort())) {
-                pin = pinOutputMap.get(itemConfig.getPort());
-            } else {
-                final Pin raspiPin = this.getRaspiPin(itemConfig.getPort());
-                LOG.debug("resolved to raspi-pin: " + raspiPin);
-                pin = controller.provisionDigitalOutputPin(raspiPin);
-                pinOutputMap.put(itemConfig.getPort(), pin);
-                // pin.setMode(PinMode.DIGITAL_OUTPUT);
-                // pin.export(PinMode.DIGITAL_OUTPUT);
+            synchronized (pinOutputMap) {
+                if (this.pinOutputMap.containsKey(itemConfig.getPort())) {
+                    pin = pinOutputMap.get(itemConfig.getPort());
+                } else {
+                    final Pin raspiPin = this.getRaspiPin(itemConfig.getPort());
+                    LOG.debug("resolved to raspi-pin: " + raspiPin);
+                    try {
+                        pin = controller.provisionDigitalOutputPin(raspiPin);
+                    } catch (GpioPinExistsException e) {
+                        LOG.warn("pin already exists", e);
+                        return null;
+                    }
+                    pinOutputMap.put(itemConfig.getPort(), pin);
+                }
             }
+
             LOG.debug("pin mode for pin '{}': {}", pin.getName(), pin.getMode());
             try {
                 if (command instanceof OnOffType) {
@@ -186,6 +215,28 @@ public class IODevice extends Device<IOConfig, GpioIOItemConfig> {
                 return RaspiPin.GPIO_19;
             case 20:
                 return RaspiPin.GPIO_20;
+            case 21:
+                return RaspiPin.GPIO_21;
+            case 22:
+                return RaspiPin.GPIO_22;
+            case 23:
+                return RaspiPin.GPIO_23;
+            case 24:
+                return RaspiPin.GPIO_24;
+            case 25:
+                return RaspiPin.GPIO_25;
+            case 26:
+                return RaspiPin.GPIO_26;
+            case 27:
+                return RaspiPin.GPIO_27;
+            case 28:
+                return RaspiPin.GPIO_28;
+            case 29:
+                return RaspiPin.GPIO_29;
+            case 30:
+                return RaspiPin.GPIO_30;
+            case 31:
+                return RaspiPin.GPIO_31;
             default:
                 throw new IllegalStateException("not a valid port: " + port);
         }
