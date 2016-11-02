@@ -171,11 +171,12 @@ public class EventReloaderJob implements Job {
             String filename = "oauth";
             CalendarFile calendarFile = calendarRuntime.getCalendarFileByFilename(filename);
             if (calendarFile != null) {
-                if (calendarFile.toBeRead(newUid)) {
-                    this.loadEvents(calendarFile, calendar, config, oldEventIds);
-                } else {
-                    this.removeOldIdsForFilename(oldEventIds, filename);
-                }
+                // if (calendarFile.toBeRead(newUid)) {
+                // the same calendar as before, nothing changed
+                this.loadEvents(calendarFile, calendar, config, oldEventIds);
+                // } else {
+                // this.removeOldIdsForFilename(oldEventIds, filename);
+                // }
             } else {
                 calendarFile = new CalendarFile(filename);
                 calendarRuntime.addCalendarFile(calendarFile);

@@ -43,7 +43,7 @@ import org.slf4j.LoggerFactory;
 public class CalDavBindingProviderImpl extends AbstractGenericBindingProvider implements CalDavBindingProvider {
     private static final Logger logger = LoggerFactory.getLogger(CalDavBindingProviderImpl.class);
 
-    private static final String REGEX_CALENDAR = "calendar:'?([A-Za-z-_]+(, ?[A-Za-z-_]+)*)'?";
+    private static final String REGEX_CALENDAR = "calendar:'?([A-Za-z0-9-_]+(, ?[A-Za-z0-9-_]+)*)'?";
     private static final String REGEX_TYPE = "type:'?([A-Za-z]+)'?";
     private static final String REGEX_EVENT_NR = "eventNr:'?([0-9]+)'?";
     private static final String REGEX_VALUE = "value:'?([A-Za-z]+)'?";
